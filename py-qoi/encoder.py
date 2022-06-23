@@ -1,7 +1,6 @@
 import bitarray as ba
 import numpy as np
 from bitarray.util import int2ba
-from PIL import Image
 
 
 def px_hash(px: list[int]) -> int:
@@ -21,16 +20,16 @@ def qoi_op_index(idx: int) -> bytes:
 def qoi_op_diff(px_diffs: np.ndarray) -> bytes:
     px_diffs_biased = px_diffs + 2
     return (ba.bitarray("01") \
-        + int2ba(px_diffs_biased[0].astype(int), length=2) \
-        + int2ba(px_diffs_biased[1].astype(int), length=2) \
-        + int2ba(px_diffs_biased[2].astype(int), length=2)).tobytes()
+        + int2ba(px_diffs_biased[0].item(), length=2) \
+        + int2ba(px_diffs_biased[1].item(), length=2) \
+        + int2ba(px_diffs_biased[2].item(), length=2)).tobytes()
 
 
 def qoi_op_luma(px_diffs: np.ndarray) -> bytes:
     return (ba.bitarray("10") \
-        + int2ba(px_diffs[0].astype(int) + 32, length=6) \
-        + int2ba(px_diffs[1].astype(int) + 8, length=4) \
-        + int2ba(px_diffs[2].astype(int) + 8, length=4)).tobytes()
+        + int2ba(px_diffs[0].item() + 32, length=6) \
+        + int2ba(px_diffs[1].item() + 8, length=4) \
+        + int2ba(px_diffs[2].item() + 8, length=4)).tobytes()
 
 
 def qoi_op_run(run: int) -> bytes:
@@ -38,11 +37,12 @@ def qoi_op_run(run: int) -> bytes:
 
 
 def encode(img: np.ndarray) -> bytes:
-    num_px = img.shape[0] * img.shape[1]
-    img_flat = img.reshape(num_px, img.shape[2])
+    width, height, chans = img.shape
+    num_px = width * height
+    img_flat = img.reshape(num_px, chans)
 
-    px_arr = np.zeros((64, img.shape[2]))
-    px_prev = np.array([0, 0, 0, 255])
+    px_arr = np.zeros((64, chans))
+    px_prev = np.array([0, 0, 0, 255]) if chans == 4 else np.array([0, 0, 0])
     img_compressed = []
     run = 0
     for ptr in range(num_px):
@@ -54,14 +54,14 @@ def encode(img: np.ndarray) -> bytes:
                 img_compressed.append(qoi_op_run(run))
                 run = 0
         else:
-            px_arr[idx] = px
-
             if run > 0:
                 img_compressed.append(qoi_op_run(run))
                 run = 0
             if np.all(np.equal(px_arr[idx], px)):
                 img_compressed.append(qoi_op_index(idx))
             else:
+                px_arr[idx] = px
+
                 if px[3] == px_prev[3]:
                     px_diff = px[:3] - px_prev[:3]
                     drdg = px_diff[0] - px_diff[1]
@@ -76,7 +76,6 @@ def encode(img: np.ndarray) -> bytes:
                     img_compressed.append(qoi_op_rgb(px))
         px_prev = px
     
-    width, height, chans = img.shape
     header = b"qoif" + width.to_bytes(4, "big") + height.to_bytes(4, "big") + chans.to_bytes(4, "big") + b"\x01"
     tail = b"\x00" * 7 + b"\x01"
 
@@ -89,4 +88,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

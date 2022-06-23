@@ -10,6 +10,10 @@ def px_hash(px: list[int]) -> int:
 
 
 def qoi_op_rgb(px: np.ndarray) -> bytes:
+    return b"\xfe" + px[:3].tobytes()
+
+
+def qoi_op_rgba(px: np.ndarray) -> bytes:
     return b"\xff" + px.tobytes()
 
 
@@ -36,8 +40,12 @@ def qoi_op_run(run: int) -> bytes:
     return (ba.bitarray("11") + int2ba(run - 1, length=6)).tobytes()
 
 
+def unsigned_sub(a: int, b: int) -> int:
+    return np.byte(np.ubyte(a) - np.ubyte(b))
+
+
 def encode(img: np.ndarray) -> bytes:
-    width, height, chans = img.shape
+    height, width, chans = img.shape
     num_px = width * height
     img_flat = img.reshape(num_px, chans)
 
@@ -47,25 +55,25 @@ def encode(img: np.ndarray) -> bytes:
     run = 0
     for ptr in range(num_px):
         px = img_flat[ptr]
-        idx = px_hash(px.tolist())
         if np.all(np.equal(px, px_prev)):
             run += 1
-            if run >= 62 or ptr <= num_px - 1:
+            if run == 62 or ptr == num_px - 1:
                 img_compressed.append(qoi_op_run(run))
                 run = 0
         else:
             if run > 0:
                 img_compressed.append(qoi_op_run(run))
                 run = 0
+            idx = px_hash(px.tolist())
             if np.all(np.equal(px_arr[idx], px)):
                 img_compressed.append(qoi_op_index(idx))
             else:
                 px_arr[idx] = px
 
                 if px[3] == px_prev[3]:
-                    px_diff = px[:3] - px_prev[:3]
-                    drdg = px_diff[0] - px_diff[1]
-                    dbdg = px_diff[2] - px_diff[1]
+                    px_diff = unsigned_sub(px[:3], px_prev[:3])
+                    drdg = unsigned_sub(px_diff[0], px_diff[1])
+                    dbdg = unsigned_sub(px_diff[2], px_diff[1])
                     if ((-2 <= px_diff) & (px_diff < 2)).all():
                         img_compressed.append(qoi_op_diff(px_diff))
                     elif -32 <= px_diff[1] < 32 and -8 <= drdg < 8 and -8 <= dbdg < 8:
@@ -73,10 +81,10 @@ def encode(img: np.ndarray) -> bytes:
                     else:
                         img_compressed.append(qoi_op_rgb(px))
                 else:
-                    img_compressed.append(qoi_op_rgb(px))
+                    img_compressed.append(qoi_op_rgba(px))
         px_prev = px
     
-    header = b"qoif" + width.to_bytes(4, "big") + height.to_bytes(4, "big") + chans.to_bytes(4, "big") + b"\x01"
+    header = b"qoif" + width.to_bytes(4, "big") + height.to_bytes(4, "big") + chans.to_bytes(1, "big") + b"\x00"
     tail = b"\x00" * 7 + b"\x01"
 
     return header + b''.join(img_compressed) + tail

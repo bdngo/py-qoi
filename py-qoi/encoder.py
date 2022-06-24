@@ -1,27 +1,40 @@
+"""
+Module for encoding images to the QOI format.
+"""
+from typing import Union
+
 import bitarray as ba
 import numpy as np
 from bitarray.util import int2ba
 
-
-def px_hash(px: list[int]) -> int:
-    r, g, b = px[:3]
-    a = px[3] if len(px) == 4 else 0
-    return ((r * 3 + g * 5 + b * 7 + a * 11) % 64)
+from utils import px_hash
 
 
 def qoi_op_rgb(px: np.ndarray) -> bytes:
+    """
+    Returns the QOI_OP_RGB pixel encoding.
+    """
     return b"\xfe" + px[:3].tobytes()
 
 
 def qoi_op_rgba(px: np.ndarray) -> bytes:
+    """
+    Returns the QOI_OP_RGBA pixel encoding.
+    """
     return b"\xff" + px.tobytes()
 
 
 def qoi_op_index(idx: int) -> bytes:
+    """
+    Returns the QOI_OP_INDEX pixel encoding.
+    """
     return ba.bitarray("00") + int2ba(idx, length=6)
 
 
 def qoi_op_diff(px_diffs: np.ndarray) -> bytes:
+    """
+    Returns the QOI_OP_DIFF pixel encoding.
+    """
     px_diffs_biased = px_diffs + 2
     return (ba.bitarray("01") \
         + int2ba(px_diffs_biased[0].item(), length=2) \
@@ -30,6 +43,9 @@ def qoi_op_diff(px_diffs: np.ndarray) -> bytes:
 
 
 def qoi_op_luma(px_diffs: np.ndarray) -> bytes:
+    """
+    Returns the QOI_OP_LUMA pixel encoding.
+    """
     return (ba.bitarray("10") \
         + int2ba(px_diffs[0].item() + 32, length=6) \
         + int2ba(px_diffs[1].item() + 8, length=4) \
@@ -37,14 +53,23 @@ def qoi_op_luma(px_diffs: np.ndarray) -> bytes:
 
 
 def qoi_op_run(run: int) -> bytes:
+    """
+    Returns the QOI_OP_RUN pixel encoding.
+    """
     return (ba.bitarray("11") + int2ba(run - 1, length=6)).tobytes()
 
 
-def unsigned_sub(a: int, b: int) -> int:
-    return np.byte(np.ubyte(a) - np.ubyte(b))
+def unsigned_sub(px1: Union[np.ndarray, int], px2: Union[np.ndarray, int]) -> int:
+    """
+    Performs subtraction between unsigned integers, then casts as signed integers.
+    """
+    return np.byte(np.ubyte(px1) - np.ubyte(px2))
 
 
 def encode(img: np.ndarray) -> bytes:
+    """
+    Encodes a Numpy array of pixels into the QOI image format.
+    """
     height, width, chans = img.shape
     num_px = width * height
     img_flat = img.reshape(num_px, chans)
@@ -71,7 +96,7 @@ def encode(img: np.ndarray) -> bytes:
                 px_arr[idx] = px
 
                 if px[3] == px_prev[3]:
-                    px_diff = unsigned_sub(px[:3], px_prev[:3])
+                    px_diff = np.apply_along_axis(unsigned_sub, px[:3], px_prev[:3])
                     drdg = unsigned_sub(px_diff[0], px_diff[1])
                     dbdg = unsigned_sub(px_diff[2], px_diff[1])
                     if ((-2 <= px_diff) & (px_diff < 2)).all():
@@ -83,16 +108,11 @@ def encode(img: np.ndarray) -> bytes:
                 else:
                     img_compressed.append(qoi_op_rgba(px))
         px_prev = px
-    
-    header = b"qoif" + width.to_bytes(4, "big") + height.to_bytes(4, "big") + chans.to_bytes(1, "big") + b"\x00"
+
+    header = b"qoif" \
+        + width.to_bytes(4, "big") \
+        + height.to_bytes(4, "big") \
+        + chans.to_bytes(1, "big") + b"\x00"
     tail = b"\x00" * 7 + b"\x01"
 
     return header + b''.join(img_compressed) + tail
-
-
-def main() -> None:
-    pass
-
-
-if __name__ == "__main__":
-    main()
